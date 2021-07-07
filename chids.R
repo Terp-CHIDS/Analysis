@@ -15,5 +15,8 @@ Merged <- read_excel("Merged.xlsx")
 #
 # summary ####
 view(Merged)
-#  ####
+str(Merged)
+summary(Merged)
+# cleaning the dataset ####
+
 
