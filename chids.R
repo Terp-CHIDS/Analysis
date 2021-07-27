@@ -153,4 +153,49 @@ res.ind$cos2           # Quality of representation
 # PCA on Indicator variables only ####
 
 # dependent variables :
-# Branding | HIV Prevention Persuasion 2
+# BRANDING | HIV_Prevention_Persuasion_2
+pca.outcome.var <- c("BRANDING", "HIV_Prevention_Persuasion_2")
+pca.outcome <- pca[pca.outcome.var]
+pca.outcome [,1:2] <- data.frame(scale(pca.outcome[,1:2]))
+pca.outcome <- prcomp(pca.outcome[,1:2], scale = T, center = T)
+summary(pca.outcome)
+fviz_eig(pca.outcome)
+
+fviz_pca_ind(pca.outcome,
+             col.ind = "cos2", # Color by the quality of representation
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = T    #  Avoid text overlapping
+)
+
+# Graph of variables. Positive correlated variables point to the same side of the plot. Negative correlated variables point to opposite sides of the graph.
+
+fviz_pca_var(pca.outcome,
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+)
+
+# Biplot of individuals and variables
+
+fviz_pca_biplot(pca.outcome, 
+                repel = TRUE,
+                col.var = "#2E9FDF", # Variables color
+                col.ind = "#696969"  # Individuals color
+)
+
+#Access to the PCA results
+
+# Eigenvalues
+eig.val <- get_eigenvalue(pca.outcome)
+eig.val
+
+# Results for Variables
+res.var <- get_pca_var(pca.outcome)
+res.var$coord          # Coordinates
+res.var$contrib        # Contributions to the PCs
+res.var$cos2           # Quality of representation 
+# Results for individuals
+res.ind <- get_pca_ind(pca.outcome)
+res.ind$coord          # Coordinates
+res.ind$contrib        # Contributions to the PCs
+res.ind$cos2           # Quality of representation 
