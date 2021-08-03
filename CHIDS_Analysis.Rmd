@@ -1,0 +1,814 @@
+---
+title: "CHIDS Analysis"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_notebook: default
+always_allow_html: yes
+---
+
+```{r setup, include=FALSE}
+
+# This chunk shows/hides the code in your final report. When echo = TRUE, the code
+# is shown in the report. When echo = FALSE, the code is hidden from the final report.
+# We would like to see your code, so please leave the setting as is during the course.
+# This chunk will not show up in your reports, so you can safely ignore its existence.
+
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+
+***
+Lets first Load all the required libraries
+```{r}
+
+library("tidyverse")
+library("tidymodels")
+library("readxl")
+
+```
+
+
+Load datasets of five customer segments
+```{r}
+df_da <- read_excel("/Users/xuzhuxuan/Desktop/CHIDS/Part\ 2\ -\ Project\ Oshun/Data/DigitalData_plus_values_interests_20210706_134406/Dating\ Apps_Respondent\ Level\ data_Final.xlsx.xlsx")
+df_da$Ad <- 'dating app'
+
+df_dbf <- read_excel("/Users/xuzhuxuan/Desktop/CHIDS/Part\ 2\ -\ Project\ Oshun/Data/DigitalData_plus_values_interests_20210706_134406/Dont\ Be\ Fooled_Respondnet\ Level\ Data_Final.xlsx")
+df_dbf$Ad <- "don't be fooled"
+
+df_f <- read_excel("/Users/xuzhuxuan/Desktop/CHIDS/Part\ 2\ -\ Project\ Oshun/Data/DigitalData_plus_values_interests_20210706_134406/Fearlessness_Full\ Respondent\ Data_Final.xlsx")
+df_f$Ad <- "fearless"
+
+df_rml <- read_excel("/Users/xuzhuxuan/Desktop/CHIDS/Part\ 2\ -\ Project\ Oshun/Data/DigitalData_plus_values_interests_20210706_134406/Read\ my\ Lips_Full\ Respondent\ Data_Final.xlsx")
+df_rml$Ad <- "read my lips"
+
+df_siv <- read_excel("/Users/xuzhuxuan/Desktop/CHIDS/Part\ 2\ -\ Project\ Oshun/Data/DigitalData_plus_values_interests_20210706_134406/She\ is\ Valuable_Full\ Respondent\ Data_Final.xlsx")
+df_siv$Ad <- "she is valuable"
+
+```
+
+
+Merge a master dataset
+```{r}
+df_all <- bind_rows(df_da, df_dbf, df_f, df_rml, df_siv)
+```
+
+
+
+### Analyze from the 'be noticed' perspective
+
+##### Enjoyment
+
+```{r}
+# filter each customer segment from the master dataset
+### conservative survivalist
+df_cs <- df_all[df_all$`Segment Questions` == "CONSERVATIVE SURVIVALIST",]
+
+### protection savvy
+df_ps <- df_all[df_all$`Segment Questions` == "PROTECTION SAVVY",]
+
+```
+
+```{r}
+df_cs %>% 
+  select(Ad, `(ENJOYMENT) ENJOYMENT`)
+```
+
+```{r}
+
+df_enjoyment_cs <- df_cs %>% 
+  mutate(`(ENJOYMENT) ENJOYMENT` = as.numeric(str_extract(df_cs$`(ENJOYMENT) ENJOYMENT`, "[0-9]+"))) %>% 
+  select(Ad, `(ENJOYMENT) ENJOYMENT`)
+
+df_enjoyment_ps <- df_ps %>% 
+  mutate(`(ENJOYMENT) ENJOYMENT` = as.numeric(str_extract(df_ps$`(ENJOYMENT) ENJOYMENT`, "[0-9]+"))) %>% 
+  select(Ad, `(ENJOYMENT) ENJOYMENT`)
+
+
+```
+
+ANOVA test
+```{r}
+fit1 <- aov(df_enjoyment_cs$`(ENJOYMENT) ENJOYMENT` ~ df_enjoyment_cs$Ad)
+summary(fit1)
+TukeyHSD(fit1) #in the stats package
+
+```
+
+```{r}
+
+fit2 <- aov(df_enjoyment_ps$`(ENJOYMENT) ENJOYMENT` ~ df_enjoyment_ps$Ad)
+summary(fit2)
+TukeyHSD(fit2) #in the stats package
+
+```
+
+***
+### Preliminary Predictive Models
+
+```{r}
+
+dfm <- read_excel("/Users/xuzhuxuan/Downloads/Merged\ Dataset\ -\ converted\ version.xlsx")
+
+```
+
+```{r}
+dfm$Ads <- as.factor(dfm$Ads)
+#### "she is valuable" ad don't have values in interest variables, exclude it
+dfm <- dfm[dfm$Ads != 'She is Valuable',]
+```
+
+
+```{r}
+# Split the data
+set.seed(333) 
+
+dfm_split <- initial_split(dfm)
+dfm_train <- training(dfm_split)
+dfm_test <- testing(dfm_split)
+
+```
+
+#### Linear regression (with interaction term of ad version)
+
+
+```{r}
+linear_model <- 
+  linear_reg() %>% 
+  set_engine("lm")
+
+fit_linear <- 
+  linear_model %>% 
+  fit(HIV_Prevention_Persuasion_2 ~ Ads * (`Motherhood  : Interest` + `Parenting  : Interest` + `Reading  : Interest` + `Word Games  : Interest` + `Charities And Causes  : Interest` + `Vacations  : Interest` + `Live Events  : Interest` + `Adventure Travel  : Interest` ), data = dfm_train)
+
+summary(fit_linear$fit)
+
+```
+
+```{r}
+results_org <- dfm_test %>%
+  			bind_cols(predict(fit_linear, new_data = dfm_test))
+
+results_org %>% 
+  select(HIV_Prevention_Persuasion_2, .pred)
+
+performance <- metric_set(rmse, mae) 
+performance(results_org, truth = HIV_Prevention_Persuasion_2, estimate = .pred)
+```
+
+```{r}
+table(dfm$HIV_Prevention_Persuasion_2)
+```
+
+#### Logistic regression
+About 80% of people said the ad makes good persuasion to me. Try to combine 1,2,3 together as not good persuasion, and set 4 as suscessful persuasion.
+
+```{r}
+
+dfm$HIV_Prevention_Persuasion_2 [dfm$HIV_Prevention_Persuasion_2 == 1] <- "0"
+dfm$HIV_Prevention_Persuasion_2 [dfm$HIV_Prevention_Persuasion_2 == 2] <- "0"
+dfm$HIV_Prevention_Persuasion_2 [dfm$HIV_Prevention_Persuasion_2 == 3] <- "0"
+dfm$HIV_Prevention_Persuasion_2 [dfm$HIV_Prevention_Persuasion_2 == 4] <- "1"
+
+```
+
+```{r}
+dfm$HIV_Prevention_Persuasion_2 <- as.factor(dfm$HIV_Prevention_Persuasion_2)
+```
+
+
+```{r}
+# Re-split the data
+set.seed(333) 
+
+dfm_split <- initial_split(dfm)
+dfm_train <- training(dfm_split)
+dfm_test <- testing(dfm_split)
+
+```
+
+
+```{r}
+# Fit logistic regression model
+fit_log <- 
+  logistic_reg() %>% 
+  set_engine("glm") %>% 
+  fit(HIV_Prevention_Persuasion_2 ~ Ads * ( `Motherhood  : Interest` + `Parenting  : Interest` + `Reading  : Interest` + `Word Games  : Interest` + `Charities And Causes  : Interest` + `Vacations  : Interest` + `Live Events  : Interest` + `Adventure Travel  : Interest` ), data = dfm_train)
+
+summary(fit_log$fit)
+
+```
+
+
+
+```{r}
+# classification in the test data
+results_log <- 
+  predict(fit_log, dfm_test, type = 'prob') %>% 
+  pluck(2) %>% 
+  bind_cols(dfm_test, Predicted_Probability = .) %>% 
+  mutate(predictedClass = as.factor(ifelse(Predicted_Probability > 0.5, 1, 0)))
+```
+
+```{r}
+conMatrix_log <- results_log %>% 
+  conf_mat(truth = HIV_Prevention_Persuasion_2, estimate = predictedClass)
+conMatrix_log
+
+summary(conMatrix_log, event_level = 'second')
+
+### AUC value
+roc_auc(results_log, truth = HIV_Prevention_Persuasion_2, Predicted_Probability, event_level = 'second')
+```
+
+Also do logistic regression on branding
+
+
+```{r}
+
+dfm$BRANDING [dfm$BRANDING == 1] <- "0"
+dfm$BRANDING [dfm$BRANDING == 2] <- "0"
+dfm$BRANDING [dfm$BRANDING == 3] <- "0"
+dfm$BRANDING [dfm$BRANDING == 4] <- "1"
+dfm$BRANDING [dfm$BRANDING == 5] <- "1"
+
+dfm$BRANDING <- as.factor(dfm$BRANDING)
+```
+
+
+
+```{r}
+# Re-split the data
+set.seed(333) 
+
+dfm_split <- initial_split(dfm)
+dfm_train <- training(dfm_split)
+dfm_test <- testing(dfm_split)
+
+```
+
+
+```{r}
+# Fit logistic regression model
+fit_log_branding <- 
+  logistic_reg() %>% 
+  set_engine("glm") %>% 
+  fit(BRANDING ~ Ads * ( `Motherhood  : Interest` + `Parenting  : Interest` + `Reading  : Interest` + `Word Games  : Interest` + `Charities And Causes  : Interest` + `Vacations  : Interest` + `Live Events  : Interest` + `Adventure Travel  : Interest` ), data = dfm_train)
+
+```
+
+
+
+
+```{r}
+# classification in the test data
+results_log_branding <- 
+  predict(fit_log_branding, dfm_test, type = 'prob') %>% 
+  pluck(2) %>% 
+  bind_cols(dfm_test, Predicted_Probability = .) %>% 
+  mutate(predictedClass = as.factor(ifelse(Predicted_Probability > 0.5, 1, 0)))
+```
+
+```{r}
+conMatrix_log_branding <- results_log_branding %>% 
+  conf_mat(truth = BRANDING, estimate = predictedClass)
+conMatrix_log_branding
+
+summary(conMatrix_log_branding, event_level = 'second')
+
+### AUC value
+roc_auc(results_log_branding, truth = BRANDING, Predicted_Probability, event_level = 'second')
+```
+
+
+#### Random Forest
+
+note: Interactions that are useful for prediction will be easily picked up with a large enough forest, so there's no real need to include an explicit interaction term.
+
+##### Random forest for persuasion
+
+```{r}
+
+
+# Create a random forest model object
+tune_spec <- rand_forest(
+  mtry = tune(),
+  trees = 1000,
+) %>%
+  set_mode("classification") %>%
+  set_engine("ranger")  
+
+# Create recipe
+tree_rec <- 
+  recipe(HIV_Prevention_Persuasion_2  ~ Ads + `Motherhood  : Interest` + `Parenting  : Interest` + `Reading  : Interest` + `Word Games  : Interest` + `Charities And Causes  : Interest` + `Vacations  : Interest` + `Live Events  : Interest` + `Adventure Travel  : Interest` , data = dfm_train)
+ 
+
+# Create workflow
+tune_wf <- 
+  workflow() %>% 
+  add_recipe(tree_rec) %>% 
+  add_model(tune_spec)
+
+```
+
+
+```{r}
+
+# train hyperparameters
+set.seed(234)
+trees_folds <- vfold_cv(dfm_train)
+
+doParallel::registerDoParallel()
+
+set.seed(345)
+tune_res <- tune_grid(
+  tune_wf,
+  resamples = trees_folds,
+  grid = 20
+)
+
+tune_res
+
+```
+
+```{r}
+best_auc <- select_best(tune_res, "roc_auc")
+
+final_rf <- finalize_model(
+  tune_spec,
+  best_auc
+)
+```
+
+```{r}
+# variable importance
+library(vip)
+
+tree_prep <- prep(tree_rec)
+
+final_rf %>%
+  set_engine("ranger", importance = "permutation") %>%
+  fit(HIV_Prevention_Persuasion_2  ~ Ads + `Motherhood  : Interest` + `Parenting  : Interest` + `Reading  : Interest` + `Word Games  : Interest` + `Charities And Causes  : Interest` + `Vacations  : Interest` + `Live Events  : Interest` + `Adventure Travel  : Interest`,
+    data = juice(tree_prep) 
+  ) %>%
+  vip(geom = "point")
+```
+
+```{r}
+
+final_wf <- workflow() %>%
+  add_recipe(tree_rec) %>%
+  add_model(final_rf)
+
+
+fit_rf <-fit(final_wf, data = dfm_test)
+```
+
+
+
+
+```{r}
+# classification in the test data
+results_rf <- 
+  predict(fit_rf, dfm_test, type = 'prob') %>% 
+  pluck(2) %>% 
+  bind_cols(dfm_test, Predicted_Probability = .) %>% 
+  mutate(predictedClass = as.factor(ifelse(Predicted_Probability > 0.5, 1, 0)))
+```
+
+```{r}
+conMatrix_rf <- results_rf %>% 
+  conf_mat(truth = HIV_Prevention_Persuasion_2, estimate = predictedClass)
+conMatrix_rf
+
+summary(conMatrix_rf, event_level = 'second')
+
+### AUC value
+roc_auc(results_rf, truth = HIV_Prevention_Persuasion_2, Predicted_Probability, event_level = 'second')
+```
+
+##### Random forest model for branding
+
+```{r}
+
+
+# Create a random forest model object
+tune_spec <- rand_forest(
+  mtry = tune(),
+  trees = 1000,
+) %>%
+  set_mode("classification") %>%
+  set_engine("ranger")  
+
+# Create recipe
+tree_rec <- 
+  recipe(BRANDING  ~ Ads + `Motherhood  : Interest` + `Parenting  : Interest` + `Reading  : Interest` + `Word Games  : Interest` + `Charities And Causes  : Interest` + `Vacations  : Interest` + `Live Events  : Interest` + `Adventure Travel  : Interest` , data = dfm_train)
+ 
+
+# Create workflow
+tune_wf <- 
+  workflow() %>% 
+  add_recipe(tree_rec) %>% 
+  add_model(tune_spec)
+
+```
+
+
+```{r}
+
+# train hyperparameters
+set.seed(234)
+trees_folds <- vfold_cv(dfm_train)
+
+doParallel::registerDoParallel()
+
+set.seed(345)
+tune_res <- tune_grid(
+  tune_wf,
+  resamples = trees_folds,
+  grid = 20
+)
+
+
+
+```
+
+```{r}
+best_auc <- select_best(tune_res, "roc_auc")
+
+final_rf <- finalize_model(
+  tune_spec,
+  best_auc
+)
+```
+
+```{r}
+
+final_wf <- workflow() %>%
+  add_recipe(tree_rec) %>%
+  add_model(final_rf)
+
+
+fit_rf <-fit(final_wf, data = dfm_test)
+```
+
+
+
+
+```{r}
+# classification in the test data
+results_rf <- 
+  predict(fit_rf, dfm_test, type = 'prob') %>% 
+  pluck(2) %>% 
+  bind_cols(dfm_test, Predicted_Probability = .) %>% 
+  mutate(predictedClass = as.factor(ifelse(Predicted_Probability > 0.5, 1, 0)))
+```
+
+```{r}
+conMatrix_rf <- results_rf %>% 
+  conf_mat(truth = BRANDING, estimate = predictedClass)
+conMatrix_rf
+
+summary(conMatrix_rf, event_level = 'second')
+
+### AUC value
+roc_auc(results_rf, truth = BRANDING, Predicted_Probability, event_level = 'second')
+```
+
+
+***
+### Predictive Models (interest + issue variables)
+
+```{r}
+
+dfm <- read_excel("/Users/xuzhuxuan/Downloads/Merged\ Dataset\ -\ converted\ version.xlsx")
+
+```
+
+```{r}
+dfm$Ads <- as.factor(dfm$Ads)
+
+```
+
+
+
+#### Logistic regression
+
+```{r}
+table(dfm$HIV_Prevention_Persuasion_2)
+```
+
+Note: About 80% of people said the ad makes good persuasion to me. Try to combine 1,2,3 together as not good persuasion, and set 4 as suscessful persuasion.
+
+```{r}
+
+dfm$HIV_Prevention_Persuasion_2 [dfm$HIV_Prevention_Persuasion_2 == 1] <- "0"
+dfm$HIV_Prevention_Persuasion_2 [dfm$HIV_Prevention_Persuasion_2 == 2] <- "0"
+dfm$HIV_Prevention_Persuasion_2 [dfm$HIV_Prevention_Persuasion_2 == 3] <- "0"
+dfm$HIV_Prevention_Persuasion_2 [dfm$HIV_Prevention_Persuasion_2 == 4] <- "1"
+
+```
+
+```{r}
+dfm$HIV_Prevention_Persuasion_2 <- as.factor(dfm$HIV_Prevention_Persuasion_2)
+```
+
+
+```{r}
+# Re-split the data
+set.seed(333) 
+
+dfm_split <- initial_split(dfm)
+dfm_train <- training(dfm_split)
+dfm_test <- testing(dfm_split)
+
+```
+
+
+```{r}
+# Fit logistic regression model
+fit_log <- 
+  logistic_reg() %>% 
+  set_engine("glm") %>% 
+  fit(HIV_Prevention_Persuasion_2 ~ Ads * ( `Motherhood  : Interest` + `Parenting  : Interest` + `Reading  : Interest` + `Word Games  : Interest` + `Charities And Causes  : Interest` + `Vacations  : Interest` + `Live Events  : Interest` + `Adventure Travel  : Interest` + `Climate Change  : ISSUE` + `Drug Usage Amongst Young People  : ISSUE` + `Having A Healthier Lifestyle  : ISSUE` + `Making Your Neighbourhood A Safer Place  : ISSUE` + `Reducing Road Accidents  : ISSUE` + `The Amount Of Alcohol Consumed By People  : ISSUE` +  `The Effects Of Smoking And Passive Smoking  : ISSUE` + `Crime Prevention  : ISSUE` + `Unemployment Or Job Security  : ISSUE` + `Gender-based Violence  : ISSUE` + `HIV Prevention  : ISSUE`), data = dfm_train)
+
+summary(fit_log$fit)
+
+```
+
+
+```{r}
+# classification in the test data
+results_log <- 
+  predict(fit_log, dfm_test, type = 'prob') %>% 
+  pluck(2) %>% 
+  bind_cols(dfm_test, Predicted_Probability = .) %>% 
+  mutate(predictedClass = as.factor(ifelse(Predicted_Probability > 0.5, 1, 0)))
+```
+
+```{r}
+conMatrix_log <- results_log %>% 
+  conf_mat(truth = HIV_Prevention_Persuasion_2, estimate = predictedClass)
+conMatrix_log
+
+summary(conMatrix_log, event_level = 'second')
+
+### AUC value
+roc_auc(results_log, truth = HIV_Prevention_Persuasion_2, Predicted_Probability, event_level = 'second')
+```
+```{r}
+table(dfm$BRANDING)
+```
+
+
+Also do logistic regression on branding
+
+
+```{r}
+
+dfm$BRANDING [dfm$BRANDING == 1] <- "0"
+dfm$BRANDING [dfm$BRANDING == 2] <- "0"
+dfm$BRANDING [dfm$BRANDING == 3] <- "0"
+dfm$BRANDING [dfm$BRANDING == 4] <- "1"
+dfm$BRANDING [dfm$BRANDING == 5] <- "1"
+
+dfm$BRANDING <- as.factor(dfm$BRANDING)
+```
+
+
+
+```{r}
+# Re-split the data
+set.seed(333) 
+
+dfm_split <- initial_split(dfm)
+dfm_train <- training(dfm_split)
+dfm_test <- testing(dfm_split)
+
+```
+
+
+```{r}
+# Fit logistic regression model
+fit_log_branding <- 
+  logistic_reg() %>% 
+  set_engine("glm") %>% 
+  fit(BRANDING ~ Ads * ( `Motherhood  : Interest` + `Parenting  : Interest` + `Reading  : Interest` + `Word Games  : Interest` + `Charities And Causes  : Interest` + `Vacations  : Interest` + `Live Events  : Interest` + `Adventure Travel  : Interest` + `Climate Change  : ISSUE` + `Drug Usage Amongst Young People  : ISSUE` + `Having A Healthier Lifestyle  : ISSUE` + `Making Your Neighbourhood A Safer Place  : ISSUE` + `Reducing Road Accidents  : ISSUE` + `The Amount Of Alcohol Consumed By People  : ISSUE` +  `The Effects Of Smoking And Passive Smoking  : ISSUE` + `Crime Prevention  : ISSUE` + `Unemployment Or Job Security  : ISSUE` + `Gender-based Violence  : ISSUE` + `HIV Prevention  : ISSUE`), data = dfm_train)
+
+summary(fit_log_branding$fit)
+
+```
+
+
+
+```{r}
+# classification in the test data
+results_log_branding <- 
+  predict(fit_log_branding, dfm_test, type = 'prob') %>% 
+  pluck(2) %>% 
+  bind_cols(dfm_test, Predicted_Probability = .) %>% 
+  mutate(predictedClass = as.factor(ifelse(Predicted_Probability > 0.5, 1, 0)))
+```
+
+```{r}
+conMatrix_log_branding <- results_log_branding %>% 
+  conf_mat(truth = BRANDING, estimate = predictedClass)
+conMatrix_log_branding
+
+summary(conMatrix_log_branding, event_level = 'second')
+
+### AUC value
+roc_auc(results_log_branding, truth = BRANDING, Predicted_Probability, event_level = 'second')
+```
+
+#### Random Forest
+
+
+
+##### Random forest for persuasion
+
+```{r}
+
+
+# Create a random forest model object
+tune_spec <- rand_forest(
+  mtry = tune(),
+  trees = 1000,
+) %>%
+  set_mode("classification") %>%
+  set_engine("ranger")  
+
+# Create recipe
+tree_rec <- 
+  recipe(HIV_Prevention_Persuasion_2 ~ Ads + `Motherhood  : Interest` + `Parenting  : Interest` + `Reading  : Interest` + `Word Games  : Interest` + `Charities And Causes  : Interest` + `Vacations  : Interest` + `Live Events  : Interest` + `Adventure Travel  : Interest` + `Climate Change  : ISSUE` + `Drug Usage Amongst Young People  : ISSUE` + `Having A Healthier Lifestyle  : ISSUE` + `Making Your Neighbourhood A Safer Place  : ISSUE` + `Reducing Road Accidents  : ISSUE` + `The Amount Of Alcohol Consumed By People  : ISSUE` +  `The Effects Of Smoking And Passive Smoking  : ISSUE` + `Crime Prevention  : ISSUE` + `Unemployment Or Job Security  : ISSUE` + `Gender-based Violence  : ISSUE` + `HIV Prevention  : ISSUE`, data = dfm_train)
+ 
+
+# Create workflow
+tune_wf <- 
+  workflow() %>% 
+  add_recipe(tree_rec) %>% 
+  add_model(tune_spec)
+
+```
+
+
+```{r}
+
+# train hyperparameters
+set.seed(234)
+trees_folds <- vfold_cv(dfm_train)
+
+doParallel::registerDoParallel()
+
+set.seed(345)
+tune_res <- tune_grid(
+  tune_wf,
+  resamples = trees_folds,
+  grid = 20
+)
+
+
+
+```
+
+```{r}
+best_auc <- select_best(tune_res, "roc_auc")
+
+final_rf <- finalize_model(
+  tune_spec,
+  best_auc
+)
+```
+
+
+
+```{r}
+
+final_wf <- workflow() %>%
+  add_recipe(tree_rec) %>%
+  add_model(final_rf)
+
+
+fit_rf <-fit(final_wf, data = dfm_test)
+```
+
+
+
+
+```{r}
+# classification in the test data
+results_rf <- 
+  predict(fit_rf, dfm_test, type = 'prob') %>% 
+  pluck(2) %>% 
+  bind_cols(dfm_test, Predicted_Probability = .) %>% 
+  mutate(predictedClass = as.factor(ifelse(Predicted_Probability > 0.5, 1, 0)))
+```
+
+```{r}
+conMatrix_rf <- results_rf %>% 
+  conf_mat(truth = HIV_Prevention_Persuasion_2, estimate = predictedClass)
+conMatrix_rf
+
+summary(conMatrix_rf, event_level = 'second')
+
+### AUC value
+roc_auc(results_rf, truth = HIV_Prevention_Persuasion_2, Predicted_Probability, event_level = 'second')
+```
+
+##### Random forest model for branding
+
+```{r}
+
+
+# Create a random forest model object
+tune_spec <- rand_forest(
+  mtry = tune(),
+  trees = 1000,
+) %>%
+  set_mode("classification") %>%
+  set_engine("ranger")  
+
+# Create recipe
+tree_rec <- 
+  recipe(BRANDING ~ Ads + `Motherhood  : Interest` + `Parenting  : Interest` + `Reading  : Interest` + `Word Games  : Interest` + `Charities And Causes  : Interest` + `Vacations  : Interest` + `Live Events  : Interest` + `Adventure Travel  : Interest` + `Climate Change  : ISSUE` + `Drug Usage Amongst Young People  : ISSUE` + `Having A Healthier Lifestyle  : ISSUE` + `Making Your Neighbourhood A Safer Place  : ISSUE` + `Reducing Road Accidents  : ISSUE` + `The Amount Of Alcohol Consumed By People  : ISSUE` +  `The Effects Of Smoking And Passive Smoking  : ISSUE` + `Crime Prevention  : ISSUE` + `Unemployment Or Job Security  : ISSUE` + `Gender-based Violence  : ISSUE` + `HIV Prevention  : ISSUE`, data = dfm_train)
+ 
+
+# Create workflow
+tune_wf <- 
+  workflow() %>% 
+  add_recipe(tree_rec) %>% 
+  add_model(tune_spec)
+
+```
+
+
+```{r}
+
+# train hyperparameters
+set.seed(234)
+trees_folds <- vfold_cv(dfm_train)
+
+doParallel::registerDoParallel()
+
+set.seed(345)
+tune_res <- tune_grid(
+  tune_wf,
+  resamples = trees_folds,
+  grid = 20
+)
+
+
+
+```
+
+```{r}
+best_auc <- select_best(tune_res, "roc_auc")
+
+final_rf <- finalize_model(
+  tune_spec,
+  best_auc
+)
+```
+
+```{r}
+
+final_wf <- workflow() %>%
+  add_recipe(tree_rec) %>%
+  add_model(final_rf)
+
+
+fit_rf <-fit(final_wf, data = dfm_test)
+```
+
+
+
+
+```{r}
+# classification in the test data
+results_rf <- 
+  predict(fit_rf, dfm_test, type = 'prob') %>% 
+  pluck(2) %>% 
+  bind_cols(dfm_test, Predicted_Probability = .) %>% 
+  mutate(predictedClass = as.factor(ifelse(Predicted_Probability > 0.5, 1, 0)))
+```
+
+```{r}
+conMatrix_rf <- results_rf %>% 
+  conf_mat(truth = BRANDING, estimate = predictedClass)
+conMatrix_rf
+
+summary(conMatrix_rf, event_level = 'second')
+
+### AUC value
+roc_auc(results_rf, truth = BRANDING, Predicted_Probability, event_level = 'second')
+```
+
+
+
+
+
+
+
+
